@@ -1,0 +1,12 @@
+[Unit]
+Description=mugen-ai local AI assistant
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/go/bin/mugen-ai serve --model gemma3:4b
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

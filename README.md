@@ -14,6 +14,19 @@ Local AI assistant for [mugen-shell](https://github.com/tmy7533018/mugen-shell),
 go install github.com/tmy7533018/mugen-ai@latest
 ```
 
+### Autostart with systemd (user service)
+
+A user service unit is provided in [`contrib/systemd/mugen-ai.service`](contrib/systemd/mugen-ai.service):
+
+```sh
+mkdir -p ~/.config/systemd/user
+cp contrib/systemd/mugen-ai.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now mugen-ai.service
+```
+
+The unit assumes the binary is at `~/go/bin/mugen-ai` (default for `go install`). To customize the model or system prompt, edit the `ExecStart` line.
+
 ## Usage
 
 Start the server (used by mugen-shell):
