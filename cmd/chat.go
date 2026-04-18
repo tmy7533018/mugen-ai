@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/tmy7533018/mugen-ai/internal/config"
+	ctxinfo "github.com/tmy7533018/mugen-ai/internal/context"
 	"github.com/tmy7533018/mugen-ai/internal/history"
 	"github.com/tmy7533018/mugen-ai/internal/ollama"
 )
@@ -26,14 +28,30 @@ var (
 
 func init() {
 	rootCmd.AddCommand(chatCmd)
-	chatCmd.Flags().StringVarP(&chatModel, "model", "m", "gemma3:4b", "Ollama model to use")
+	chatCmd.Flags().StringVarP(&chatModel, "model", "m", "", "Ollama model to use (overrides config)")
 	chatCmd.Flags().StringVar(&chatOllama, "ollama-host", "http://localhost:11434", "Ollama host URL")
-	chatCmd.Flags().StringVar(&chatSystem, "system", "You are a helpful desktop assistant. Be concise.", "System prompt")
+	chatCmd.Flags().StringVar(&chatSystem, "system", "", "System prompt (overrides config)")
 }
 
 func runChat(_ *cobra.Command, _ []string) error {
-	client := ollama.New(chatOllama, chatModel)
-	hist := history.New(chatSystem)
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: config load failed, using defaults: %v\n", err)
+		cfg = config.Default()
+	}
+
+	model := chatModel
+	if model == "" {
+		model = "gemma3:4b"
+	}
+	system := chatSystem
+	if system == "" {
+		system = cfg.Personality.SystemPrompt
+	}
+
+	client := ollama.New(chatOllama, model)
+	hist := history.New(system)
+	hist.ContextFunc = func() string { return ctxinfo.Build(cfg.Context) }
 	scanner := bufio.NewScanner(os.Stdin)
 
 	fmt.Printf("Chat with %s  (commands: exit, clear)\n\n", chatModel)
