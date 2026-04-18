@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
+	"time"
 )
 
 type Message struct {
@@ -23,6 +25,7 @@ type ChatChunk struct {
 type Client struct {
 	host  string
 	model string
+	mu    sync.RWMutex
 	http  *http.Client
 }
 
@@ -34,9 +37,34 @@ func New(host, model string) *Client {
 	}
 }
 
+func (c *Client) SetModel(model string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.model = model
+}
+
+func (c *Client) Ping(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.host+"/api/tags", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
 func (c *Client) Chat(ctx context.Context, messages []Message, fn func(ChatChunk) error) error {
+	c.mu.RLock()
+	model := c.model
+	c.mu.RUnlock()
+
 	body, err := json.Marshal(map[string]any{
-		"model":    c.model,
+		"model":    model,
 		"messages": messages,
 		"stream":   true,
 	})
