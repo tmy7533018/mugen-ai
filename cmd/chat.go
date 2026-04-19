@@ -11,7 +11,8 @@ import (
 	"github.com/tmy7533018/mugen-ai/internal/config"
 	ctxinfo "github.com/tmy7533018/mugen-ai/internal/context"
 	"github.com/tmy7533018/mugen-ai/internal/history"
-	"github.com/tmy7533018/mugen-ai/internal/ollama"
+	"github.com/tmy7533018/mugen-ai/internal/provider"
+	"github.com/tmy7533018/mugen-ai/internal/state"
 )
 
 var chatCmd = &cobra.Command{
@@ -22,14 +23,12 @@ var chatCmd = &cobra.Command{
 
 var (
 	chatModel  string
-	chatOllama string
 	chatSystem string
 )
 
 func init() {
 	rootCmd.AddCommand(chatCmd)
-	chatCmd.Flags().StringVarP(&chatModel, "model", "m", "", "Ollama model to use (overrides config)")
-	chatCmd.Flags().StringVar(&chatOllama, "ollama-host", "http://localhost:11434", "Ollama host URL")
+	chatCmd.Flags().StringVarP(&chatModel, "model", "m", "", "model to use (overrides config)")
 	chatCmd.Flags().StringVar(&chatSystem, "system", "", "System prompt (overrides config)")
 }
 
@@ -42,19 +41,26 @@ func runChat(_ *cobra.Command, _ []string) error {
 
 	model := chatModel
 	if model == "" {
-		model = "gemma3:4b"
+		model = state.LoadModel()
 	}
 	system := chatSystem
 	if system == "" {
 		system = cfg.Personality.SystemPrompt
 	}
 
-	client := ollama.New(chatOllama, model)
+	registry := buildRegistry(cfg, model)
+	if model == "" {
+		if models, _ := registry.Models(context.Background()); len(models) > 0 {
+			model = models[0]
+			registry.SetModel(model)
+		}
+	}
+
 	hist := history.New(system)
 	hist.ContextFunc = func() string { return ctxinfo.Build(cfg.Context) }
 	scanner := bufio.NewScanner(os.Stdin)
 
-	fmt.Printf("Chat with %s  (commands: exit, clear)\n\n", chatModel)
+	fmt.Printf("Chat with %s  (commands: exit, clear)\n\n", model)
 
 	for {
 		fmt.Print("> ")
@@ -77,9 +83,9 @@ func runChat(_ *cobra.Command, _ []string) error {
 		hist.Add("user", input)
 
 		var fullResponse string
-		err := client.Chat(context.Background(), hist.Messages(), func(chunk ollama.ChatChunk) error {
-			fmt.Print(chunk.Message.Content)
-			fullResponse += chunk.Message.Content
+		err := registry.Chat(context.Background(), hist.Messages(), func(chunk provider.ChatChunk) error {
+			fmt.Print(chunk.Content)
+			fullResponse += chunk.Content
 			return nil
 		})
 		fmt.Println()

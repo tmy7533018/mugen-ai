@@ -3,14 +3,14 @@ package history
 import (
 	"sync"
 
-	"github.com/tmy7533018/mugen-ai/internal/ollama"
+	"github.com/tmy7533018/mugen-ai/internal/provider"
 )
 
 const defaultMaxMessages = 100
 
 type History struct {
 	mu          sync.Mutex
-	messages    []ollama.Message
+	messages    []provider.Message
 	system      string
 	max         int
 	ContextFunc func() string
@@ -23,7 +23,7 @@ func New(systemPrompt string) *History {
 func (h *History) Add(role, content string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.messages = append(h.messages, ollama.Message{Role: role, Content: content})
+	h.messages = append(h.messages, provider.Message{Role: role, Content: content})
 	h.truncateLocked()
 }
 
@@ -35,17 +35,17 @@ func (h *History) RemoveLast() {
 	}
 }
 
-func (h *History) Messages() []ollama.Message {
+func (h *History) Messages() []provider.Message {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	result := make([]ollama.Message, 0, len(h.messages)+1)
+	result := make([]provider.Message, 0, len(h.messages)+1)
 	if h.system != "" {
 		prompt := h.system
 		if h.ContextFunc != nil {
 			prompt += h.ContextFunc()
 		}
-		result = append(result, ollama.Message{Role: "system", Content: prompt})
+		result = append(result, provider.Message{Role: "system", Content: prompt})
 	}
 	return append(result, h.messages...)
 }
@@ -66,6 +66,5 @@ func (h *History) truncateLocked() {
 	if h.max <= 0 || len(h.messages) <= h.max {
 		return
 	}
-	// Keep the most recent messages, trim from the front
 	h.messages = h.messages[len(h.messages)-h.max:]
 }

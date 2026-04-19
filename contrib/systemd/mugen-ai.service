@@ -4,7 +4,8 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=%h/go/bin/mugen-ai serve --model gemma3:4b
+EnvironmentFile=-%h/.config/mugen-ai/.env
+ExecStart=%h/go/bin/mugen-ai serve
 Restart=on-failure
 RestartSec=3
 

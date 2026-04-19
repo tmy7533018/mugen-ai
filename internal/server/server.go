@@ -4,23 +4,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sync"
 
 	"github.com/tmy7533018/mugen-ai/internal/history"
-	"github.com/tmy7533018/mugen-ai/internal/ollama"
+	"github.com/tmy7533018/mugen-ai/internal/provider"
+	"github.com/tmy7533018/mugen-ai/internal/state"
 )
 
 const maxRequestBody = 64 * 1024 // 64KB
 
 type Server struct {
-	mu      sync.RWMutex
-	client  *ollama.Client
-	history *history.History
-	model   string
+	registry *provider.Registry
+	history  *history.History
 }
 
-func New(client *ollama.Client, hist *history.History, model string) *Server {
-	return &Server{client: client, history: hist, model: model}
+func New(registry *provider.Registry, hist *history.History) *Server {
+	return &Server{registry: registry, history: hist}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -73,10 +71,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	var fullResponse string
 
-	err := s.client.Chat(r.Context(), s.history.Messages(), func(chunk ollama.ChatChunk) error {
-		fullResponse += chunk.Message.Content
+	err := s.registry.Chat(r.Context(), s.history.Messages(), func(chunk provider.ChatChunk) error {
+		fullResponse += chunk.Content
 		data, _ := json.Marshal(map[string]any{
-			"content": chunk.Message.Content,
+			"content": chunk.Content,
 			"done":    chunk.Done,
 		})
 		fmt.Fprintf(w, "data: %s\n\n", data)
@@ -85,7 +83,6 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err != nil {
-		// Remove the dangling user message on failure
 		s.history.RemoveLast()
 		data, _ := json.Marshal(map[string]any{"error": err.Error(), "done": true})
 		fmt.Fprintf(w, "data: %s\n\n", data)
@@ -103,30 +100,8 @@ func (s *Server) handleClearHistory(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	model := s.model
-	s.mu.RUnlock()
-
-	ollamaOk := s.client.Ping(r.Context())
-
-	status := "ok"
-	code := http.StatusOK
-	if !ollamaOk {
-		status = "ollama_unavailable"
-		code = http.StatusServiceUnavailable
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]any{
-		"status": status,
-		"model":  model,
-	})
-}
-
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
-	models, err := s.client.Models(r.Context())
+	models, err := s.registry.Models(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
@@ -148,13 +123,27 @@ func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.mu.Lock()
-	s.model = req.Model
-	s.mu.Unlock()
-
-	s.client.SetModel(req.Model)
+	s.registry.SetModel(req.Model)
 	s.history.Clear()
+	_ = state.SaveModel(req.Model)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"model": req.Model})
 }
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	model := s.registry.Model()
+	status := "ok"
+	if model == "" {
+		status = "no_model"
+	} else if !s.registry.Ping(r.Context()) {
+		status = "provider_unavailable"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"status": status,
+		"model":  model,
+	})
+}
+

@@ -1,4 +1,4 @@
-package ollama
+package provider
 
 import (
 	"bufio"
@@ -7,50 +7,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 )
 
-type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+type Ollama struct {
+	host string
+	http *http.Client
 }
 
-type ChatChunk struct {
-	Message Message `json:"message"`
-	Done    bool    `json:"done"`
-	Error   string  `json:"error,omitempty"`
+func NewOllama(host string) *Ollama {
+	return &Ollama{host: host, http: &http.Client{}}
 }
 
-type Client struct {
-	host  string
-	model string
-	mu    sync.RWMutex
-	http  *http.Client
-}
+func (o *Ollama) Name() string { return "ollama" }
 
-func New(host, model string) *Client {
-	return &Client{
-		host:  host,
-		model: model,
-		http:  &http.Client{},
-	}
-}
-
-func (c *Client) SetModel(model string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.model = model
-}
-
-func (c *Client) Ping(ctx context.Context) bool {
+func (o *Ollama) Ping(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.host+"/api/tags", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, o.host+"/api/tags", nil)
 	if err != nil {
 		return false
 	}
-	resp, err := c.http.Do(req)
+	resp, err := o.http.Do(req)
 	if err != nil {
 		return false
 	}
@@ -58,11 +36,7 @@ func (c *Client) Ping(ctx context.Context) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-func (c *Client) Chat(ctx context.Context, messages []Message, fn func(ChatChunk) error) error {
-	c.mu.RLock()
-	model := c.model
-	c.mu.RUnlock()
-
+func (o *Ollama) Chat(ctx context.Context, model string, messages []Message, fn func(ChatChunk) error) error {
 	body, err := json.Marshal(map[string]any{
 		"model":    model,
 		"messages": messages,
@@ -72,13 +46,13 @@ func (c *Client) Chat(ctx context.Context, messages []Message, fn func(ChatChunk
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.host+"/api/chat", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.host+"/api/chat", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.http.Do(req)
+	resp, err := o.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("ollama unreachable: %w", err)
 	}
@@ -88,33 +62,45 @@ func (c *Client) Chat(ctx context.Context, messages []Message, fn func(ChatChunk
 		return fmt.Errorf("ollama returned status %d", resp.StatusCode)
 	}
 
+	var raw struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+		Done bool `json:"done"`
+	}
+
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
 		}
-		var chunk ChatChunk
-		if err := json.Unmarshal(line, &chunk); err != nil {
+		raw = struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+			Done bool `json:"done"`
+		}{}
+		if err := json.Unmarshal(line, &raw); err != nil {
 			continue
 		}
-		if err := fn(chunk); err != nil {
+		if err := fn(ChatChunk{Content: raw.Message.Content, Done: raw.Done}); err != nil {
 			return err
 		}
-		if chunk.Done {
+		if raw.Done {
 			break
 		}
 	}
 	return scanner.Err()
 }
 
-func (c *Client) Models(ctx context.Context) ([]string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.host+"/api/tags", nil)
+func (o *Ollama) Models(ctx context.Context) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, o.host+"/api/tags", nil)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := c.http.Do(req)
+	resp, err := o.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("ollama unreachable: %w", err)
 	}

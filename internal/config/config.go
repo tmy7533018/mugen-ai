@@ -10,6 +10,7 @@ import (
 type Config struct {
 	Personality Personality `toml:"personality"`
 	Context     Context     `toml:"context"`
+	Provider    Provider    `toml:"provider"`
 }
 
 type Personality struct {
@@ -21,6 +22,19 @@ type Context struct {
 	City   string `toml:"city"`
 }
 
+type Provider struct {
+	Ollama Ollama `toml:"ollama"`
+	Google Google `toml:"google"`
+}
+
+type Ollama struct {
+	Host string `toml:"host"`
+}
+
+type Google struct {
+	Model string `toml:"model"`
+}
+
 func Default() Config {
 	return Config{
 		Personality: Personality{
@@ -28,6 +42,9 @@ func Default() Config {
 		},
 		Context: Context{
 			Locale: "en",
+		},
+		Provider: Provider{
+			Ollama: Ollama{Host: "http://localhost:11434"},
 		},
 	}
 }
